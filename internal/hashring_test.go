@@ -22,7 +22,7 @@ func TestHashRing(t *testing.T) {
 	// can be deleted
 	for nodehash, node := range hashRing.Nodes {
 		for key, value := range node.Data {
-			t.Logf("nodeHash:%v, key: %v, value: %v", nodehash, key, value)
+			fmt.Printf("nodeHash:%s, key: %s, value: %s\n", nodehash, key, value)
 		}
 	}
 	// test
