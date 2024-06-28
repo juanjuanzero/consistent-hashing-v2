@@ -30,9 +30,14 @@ func (hr *HashRing) AddData(key, value string) error {
 	}
 	// find the node responsible for the data
 	// add it to that node
-	primaryNode.Data[hashed] = value
+	primaryNode.AddData(hashed, value)
+
 	return nil
 }
+
+// add a function that will get all of the data from the primary and the replicas
+// add a function that will pick the most recent update from all of the data using vector clocks
+// add a function that will randomly pick which node to save the data to
 
 // a method to get data
 func (hr *HashRing) GetData(key string) (string, error) {
@@ -78,6 +83,17 @@ type Node struct {
 	Name      string
 	HashValue string
 	Data      map[string]string
+}
+
+func (n *Node) AddData(key, value string) {
+	n.Data[key] = value
+}
+func (n *Node) GetData(key string) (string, error) {
+	value, ok := n.Data[key]
+	if !ok {
+		return "", fmt.Errorf("value for key %v not found", key)
+	}
+	return value, nil
 }
 
 func NewNode(hash, name string) *Node {
