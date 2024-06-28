@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"crypto/sha1"
 	"fmt"
+	"math/rand"
 	"slices"
 )
 
@@ -17,27 +18,53 @@ type HashRing struct {
 
 // a method to add data
 func (hr *HashRing) AddData(key, value string) error {
-	// hash the key of the incoming data
-	hashed := hashString(key)
-
-	// find the node where this is stored
-	primaryNode, err := hr.GetNode(hashed)
-	if err != nil {
-		return fmt.Errorf("failed to get data using %v", err)
-	}
-	if primaryNode == nil {
-		return fmt.Errorf("failed to get data using %v", err)
-	}
 	// find the node responsible for the data
+	hashed := hashString(key)
+	nodes, err := hr.GetNodes(hashed, value)
+	if err != nil {
+		return fmt.Errorf("error retrieving all of the nodes %v", err)
+	}
+	chosen := hr.PickOne(nodes)
 	// add it to that node
-	primaryNode.AddData(hashed, value)
+	chosen.AddData(hashed, value)
 
 	return nil
 }
 
 // add a function that will get all of the data from the primary and the replicas
-// add a function that will pick the most recent update from all of the data using vector clocks
+func (hr *HashRing) GetNodes(hashedKey, value string) ([]*Node, error) {
+	// find the node where this is stored
+	var nodes []*Node
+	primaryNode, err := hr.GetNode(hashedKey)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get data using %v", err)
+	}
+	if primaryNode == nil {
+		return nil, fmt.Errorf("failed to get data using %v", err)
+	}
+	nodes = append(nodes, primaryNode)
+	// get the replicas
+	for _, replicaHash := range hr.NodeToReplica[primaryNode.HashValue] {
+		replica, err := hr.GetNode(replicaHash)
+		if err != nil {
+			return nil, fmt.Errorf("failed to replica data using %v", err)
+		}
+		if replica == nil {
+			return nil, fmt.Errorf("failed to get data using %v", err)
+		}
+		nodes = append(nodes, replica)
+	}
+	return nodes, nil
+
+}
+
 // add a function that will randomly pick which node to save the data to
+func (hr *HashRing) PickOne(nodes []*Node) *Node {
+	index := rand.Intn(len(nodes) - 1)
+	return nodes[index]
+}
+
+// add a function that will pick the most recent update from all of the data using vector clocks
 
 // a method to get data
 func (hr *HashRing) GetData(key string) (string, error) {
@@ -80,9 +107,10 @@ func hashString(key string) string {
 }
 
 type Node struct {
-	Name      string
-	HashValue string
-	Data      map[string]string
+	Name        string
+	HashValue   string
+	Data        map[string]string
+	VectorClock []int
 }
 
 func (n *Node) AddData(key, value string) {
@@ -104,6 +132,8 @@ func NewNode(hash, name string) *Node {
 		Data:      data,
 	}
 }
+
+// give data a shape to also contain the vector clock as metadata
 
 func NewHashRing(nodeCount int) *HashRing {
 	// for at least the number of replicas create nodes in the hash ring
