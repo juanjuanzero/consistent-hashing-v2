@@ -18,19 +18,24 @@ type HashRing struct {
 }
 
 // a method to add data
-func (hr *HashRing) AddData(key string, value KeyValueData) error {
+func (hr *HashRing) AddData(key string, value string) error {
 	// find the node responsible for the data
 	hashed := hashString(key)
-	value.HashedKey = hashed
+	dataElement := hr.CreateDataElement(key, hashed, value)
 	nodes, err := hr.GetNodes(hashed)
 	if err != nil {
 		return fmt.Errorf("error retrieving all of the nodes %v", err)
 	}
 	chosen := hr.PickOne(nodes)
 	// add it to that node
-	chosen.AddData(hashed, value)
+	chosen.AddData(hashed, dataElement)
 
 	return nil
+}
+
+func (hr *HashRing) CreateDataElement(key, hashedKey, val string) KeyValueData {
+	vectorClock := make([]int, hr.NodeCount)
+	return KeyValueData{VectorClock: vectorClock, Value: val, Key: key, HashedKey: hashedKey}
 }
 
 // add a function that will get all of the data from the primary and the replicas
@@ -73,7 +78,7 @@ func (hr *HashRing) ResolveToUpdated(toResolve []KeyValueData) KeyValueData {
 	if len(toResolve) == 1 {
 		return toResolve[0]
 	}
-	var mostUpdate KeyValueData
+	mostUpdate := KeyValueData{VectorClock: make([]int, hr.NodeCount)}
 	for i, iNode := range toResolve {
 		for j, jNode := range toResolve {
 			if i == j {

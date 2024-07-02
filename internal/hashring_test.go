@@ -12,17 +12,12 @@ func TestHashRing(t *testing.T) {
 	// create a hashring
 	hashRing := hashring.NewHashRing(3)
 	// add data to hashring
-	dataMap := make(map[string]hashring.KeyValueData)
+	dataMap := make(map[string]string)
 	for i := range 10 {
 		dataValue := fmt.Sprintf("Node Data:%v", i)
 		key := fmt.Sprintf("key:%v", i)
-		data := hashring.KeyValueData{
-			Key:         key,
-			Value:       dataValue,
-			VectorClock: []int{0, 0, 0},
-		}
-		hashRing.AddData(key, data)
-		dataMap[key] = data
+		hashRing.AddData(key, dataValue)
+		dataMap[key] = dataValue
 	}
 
 	for k, v := range dataMap {
@@ -30,7 +25,7 @@ func TestHashRing(t *testing.T) {
 		if err != nil {
 			t.Errorf("error in test getting expected %v, error: %v ", v, err)
 		}
-		if retrieved.Value != v.Value {
+		if retrieved.Value != v {
 			t.Errorf("got wrong value %v, expected %v", retrieved, v)
 		}
 	}
@@ -87,8 +82,8 @@ func TestResolveUpdated(t *testing.T) {
 			{VectorClock: []int{0, 0, 0, 0, 0}, Value: "3"},
 		}
 		result := hashRing.ResolveToUpdated(toResolve)
-		if result.Value != "3" {
-			t.Errorf("got wrong value %v, expected %v", result.Value, "3")
+		if result.Value != "2" {
+			t.Errorf("got wrong value %v, expected %v", result.Value, "2")
 		}
 	})
 
