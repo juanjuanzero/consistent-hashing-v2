@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"crypto/sha1"
 	"fmt"
+	"log"
 	"math/rand"
 	"slices"
 )
@@ -17,10 +18,11 @@ type HashRing struct {
 }
 
 // a method to add data
-func (hr *HashRing) AddData(key, value string) error {
+func (hr *HashRing) AddData(key string, value KeyValueData) error {
 	// find the node responsible for the data
 	hashed := hashString(key)
-	nodes, err := hr.GetNodes(hashed, value)
+	value.HashedKey = hashed
+	nodes, err := hr.GetNodes(hashed)
 	if err != nil {
 		return fmt.Errorf("error retrieving all of the nodes %v", err)
 	}
@@ -32,7 +34,7 @@ func (hr *HashRing) AddData(key, value string) error {
 }
 
 // add a function that will get all of the data from the primary and the replicas
-func (hr *HashRing) GetNodes(hashedKey, value string) ([]*Node, error) {
+func (hr *HashRing) GetNodes(hashedKey string) ([]*Node, error) {
 	// find the node where this is stored
 	var nodes []*Node
 	primaryNode, err := hr.GetNode(hashedKey)
@@ -60,28 +62,106 @@ func (hr *HashRing) GetNodes(hashedKey, value string) ([]*Node, error) {
 
 // add a function that will randomly pick which node to save the data to
 func (hr *HashRing) PickOne(nodes []*Node) *Node {
-	index := rand.Intn(len(nodes) - 1)
+	index := rand.Intn(len(nodes))
 	return nodes[index]
 }
 
 // add a function that will pick the most recent update from all of the data using vector clocks
+func (hr *HashRing) ResolveToUpdated(toResolve []KeyValueData) KeyValueData {
+	// look at the vector clocks of each and find the one that has
+	// an update is valid if the vector clock of the node is valid at the
+	if len(toResolve) == 1 {
+		return toResolve[0]
+	}
+	var mostUpdate KeyValueData
+	for i, iNode := range toResolve {
+		for j, jNode := range toResolve {
+			if i == j {
+				// its the same element
+				continue
+			} else {
+				// compare vector clocks
+				// find the one with the most up to date information i.e. the latest vector clock
+				// a vector clock is happened before another if all of the elements are <= the other's elements
+				result := CmpElementWise(iNode.VectorClock, jNode.VectorClock)
+				if result == 1 {
+					// compare it to the mostUptoDate
+					isLater := CmpElementWise(iNode.VectorClock, mostUpdate.VectorClock)
+					if isLater == 1 {
+						mostUpdate = iNode
+					}
+				}
+			}
+		}
+	}
+	return mostUpdate
+}
+
+// CmpElementWise takes in two slices of ints and compare them element wise
+// -1 if all elements in a are less than b
+// 1 if all elements in a are greater than b
+// 0 if not all elements are less than or equal
+// the skip is index that should be skipped
+func CmpElementWise(a, b []int) int {
+	truthTable := make([]int, len(a))
+	for i := range len(a) {
+		if a[i] == b[i] {
+			truthTable[i] = 0
+			continue
+		}
+		if a[i] < b[i] {
+			truthTable[i] = -1
+			continue
+		}
+		if a[i] > b[i] {
+			truthTable[i] = 1
+			continue
+		}
+	}
+
+	position := 0
+	for _, val := range truthTable {
+		if val == 0 || val == position {
+			// if its the same as before go next
+			continue
+		}
+		if val == -1*position {
+			// if there is a change in direction, then not all elements fit
+			return 0
+		}
+		// val is position
+		position = val
+	}
+
+	return position
+}
 
 // a method to get data
-func (hr *HashRing) GetData(key string) (string, error) {
+func (hr *HashRing) GetData(key string) (KeyValueData, error) {
 	// hash the key of the incoming data
 	hashed := hashString(key)
 
 	// find the node where this is stored
-	primaryNode, err := hr.GetNode(hashed)
+	nodes, err := hr.GetNodes(hashed)
 	if err != nil {
-		return "", fmt.Errorf("failed to get data using %v, err: %v", key, err)
+		return KeyValueData{}, fmt.Errorf("failed to get data using %v, err: %v", key, err)
 	}
-	if primaryNode == nil {
-		return "", fmt.Errorf("no node found for key %v, err: %v", key, err)
+	if nodes == nil {
+		return KeyValueData{}, fmt.Errorf("no node found for key %v, err: %v", key, err)
 	}
 	// get it from that node
-	// TODO eventually do quorum read
-	return primaryNode.Data[hashed], nil
+	toResolve := []KeyValueData{}
+	for _, node := range nodes {
+		data, err := node.GetData(hashed)
+		if err != nil {
+			log.Printf("key %v not found", key)
+			continue
+		}
+		toResolve = append(toResolve, data)
+
+	}
+	data := hr.ResolveToUpdated(toResolve)
+	return data, nil
 }
 
 // finds the node that would be responsible for this hash
@@ -109,27 +189,42 @@ func hashString(key string) string {
 type Node struct {
 	Name        string
 	HashValue   string
-	Data        map[string]string
+	Data        map[string]KeyValueData
+	VectorClock []int
+	VectorIndex int
+}
+
+type KeyValueData struct {
+	Key         string
+	HashedKey   string
+	Value       string
 	VectorClock []int
 }
 
-func (n *Node) AddData(key, value string) {
+func (n *Node) AddData(key string, value KeyValueData) {
+	// increment the vector clock of the node
+	n.VectorClock[n.VectorIndex]++
+	// increment the vector clock of the message for metadata
+	value.VectorClock[n.VectorIndex]++
 	n.Data[key] = value
 }
-func (n *Node) GetData(key string) (string, error) {
+func (n *Node) GetData(key string) (KeyValueData, error) {
 	value, ok := n.Data[key]
 	if !ok {
-		return "", fmt.Errorf("value for key %v not found", key)
+		return KeyValueData{}, fmt.Errorf("value for key %v not found", key)
 	}
 	return value, nil
 }
 
-func NewNode(hash, name string) *Node {
-	data := make(map[string]string)
+func NewNode(hash, name string, vectorIndex int, nodeCount int) *Node {
+	data := make(map[string]KeyValueData)
+	vectorClock := make([]int, nodeCount)
 	return &Node{
-		HashValue: hash,
-		Name:      name,
-		Data:      data,
+		HashValue:   hash,
+		Name:        name,
+		Data:        data,
+		VectorIndex: vectorIndex,
+		VectorClock: vectorClock,
 	}
 }
 
@@ -148,7 +243,7 @@ func NewHashRing(nodeCount int) *HashRing {
 	for i := 0; i < nodeCount; i++ {
 		name := fmt.Sprintf("Node%v", i)
 		hashName := hasher.Sum([]byte(name))
-		node := NewNode(string(hashName), name)
+		node := NewNode(string(hashName), name, i, nodeCount)
 		nodes = append(nodes, node)
 	}
 
