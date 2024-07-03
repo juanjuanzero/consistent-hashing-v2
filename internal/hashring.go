@@ -21,6 +21,9 @@ type HashRing struct {
 func (hr *HashRing) AddData(key string, value string) error {
 	// find the node responsible for the data
 	hashed := hashString(key)
+	// get the data
+	// having a vector clock update the vector clock so that the chosen node will have a higher value
+	// if you dont find one create a new element
 	dataElement := hr.CreateDataElement(key, hashed, value)
 	nodes, err := hr.GetNodes(hashed)
 	if err != nil {
@@ -166,6 +169,7 @@ func (hr *HashRing) GetData(key string) (KeyValueData, error) {
 
 	}
 	data := hr.ResolveToUpdated(toResolve)
+	// now that we have the most up to date information, we should also update the other ones with a vector clock
 	return data, nil
 }
 
