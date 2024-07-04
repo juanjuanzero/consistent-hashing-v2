@@ -30,7 +30,7 @@ func TestHashRing(t *testing.T) {
 			}
 		}
 	})
-	t.Run("can handle updates to the vector clock", func(t *testing.T) {
+	t.Run("can handle updates to the to different nodes using vector clocks", func(t *testing.T) {
 		hashRing := hashring.NewHashRing(3)
 		// add data to hashring
 		dataMap := make(map[string]string)

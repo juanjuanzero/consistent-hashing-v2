@@ -3,8 +3,8 @@ package hashring
 import (
 	"cmp"
 	"crypto/sha1"
+	"errors"
 	"fmt"
-	"log"
 	"math/rand"
 	"slices"
 )
@@ -21,17 +21,28 @@ type HashRing struct {
 func (hr *HashRing) AddData(key string, value string) error {
 	// find the node responsible for the data
 	hashed := hashString(key)
-	// get the data
-	// having a vector clock update the vector clock so that the chosen node will have a higher value
-	// if you dont find one create a new element
-	dataElement := hr.CreateDataElement(key, hashed, value)
 	nodes, err := hr.GetNodes(hashed)
 	if err != nil {
 		return fmt.Errorf("error retrieving all of the nodes %v", err)
 	}
 	chosen := hr.PickOne(nodes)
-	// add it to that node
-	chosen.AddData(hashed, dataElement)
+
+	insertedData, err := hr.GetData(key)
+	if err != nil {
+		if !errors.Is(err, &NoDataError{}) {
+			return err
+		} else {
+			dataElement := hr.CreateDataElement(key, hashed, value)
+			chosen.AddData(hashed, dataElement)
+		}
+	} else {
+		// slices in go are pointers
+		vectorClock := make([]int, len(insertedData.VectorClock))
+		copy(vectorClock, insertedData.VectorClock)
+		insertedData.Value = value
+		insertedData.VectorClock = vectorClock
+		chosen.AddData(hashed, insertedData)
+	}
 
 	return nil
 }
@@ -162,15 +173,16 @@ func (hr *HashRing) GetData(key string) (KeyValueData, error) {
 	for _, node := range nodes {
 		data, err := node.GetData(hashed)
 		if err != nil {
-			log.Printf("key %v not found", key)
 			continue
 		}
 		toResolve = append(toResolve, data)
 
 	}
-	data := hr.ResolveToUpdated(toResolve)
-	// now that we have the most up to date information, we should also update the other ones with a vector clock
-	return data, nil
+	if len(toResolve) > 0 {
+		data := hr.ResolveToUpdated(toResolve)
+		return data, nil
+	}
+	return KeyValueData{}, &NoDataError{}
 }
 
 // finds the node that would be responsible for this hash
@@ -217,10 +229,10 @@ func (n *Node) AddData(key string, value KeyValueData) {
 	value.VectorClock[n.VectorIndex]++
 	n.Data[key] = value
 }
-func (n *Node) GetData(key string) (KeyValueData, error) {
-	value, ok := n.Data[key]
+func (n *Node) GetData(hashedKey string) (KeyValueData, error) {
+	value, ok := n.Data[hashedKey]
 	if !ok {
-		return KeyValueData{}, fmt.Errorf("value for key %v not found", key)
+		return KeyValueData{}, fmt.Errorf("value for key %v not found", hashedKey)
 	}
 	return value, nil
 }
@@ -286,4 +298,10 @@ func GetNextElement(index, length, replicaCount int) int {
 		return 0
 	}
 	return index + 1
+}
+
+type NoDataError struct{}
+
+func (e *NoDataError) Error() string {
+	return fmt.Sprint("no data found")
 }
